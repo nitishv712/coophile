@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import { ObjectId } from 'mongodb';
 import { GAMES, ensureIndexes, getDb, getRomBucket } from '../db/mongo';
 import { acceptedExtensions, toGame, type Game, type GameDoc, type GameInput } from './types';
+import { readCached, writeCached, dropCached } from './romCache';
 import { ArchiveError, extractRomFromZip, looksLikeZip } from './archive';
 
 async function collection() {
@@ -101,7 +102,10 @@ export async function deleteGame(slug: string): Promise<boolean> {
   const doc = await games.findOne({ slug });
   if (!doc) return false;
 
-  if (doc.rom) await removeRomFile(doc.rom.fileId);
+  if (doc.rom) {
+    await removeRomFile(doc.rom.fileId);
+    await dropCached(doc.rom.sha256);
+  }
   await games.deleteOne({ slug });
   return true;
 }
@@ -195,6 +199,10 @@ export async function attachRom(
   );
   if (previous) await removeRomFile(previous);
 
+  // The bytes are already in hand, so seed the cache now rather than making the
+  // first player pay for a round-trip to fetch back what we just sent.
+  await writeCached(sha256, romData);
+
   const updated = await games.findOne({ slug });
   return updated ? toGame(updated) : null;
 }
@@ -204,7 +212,10 @@ export async function detachRom(slug: string): Promise<Game | null> {
   const doc = await games.findOne({ slug });
   if (!doc) return null;
 
-  if (doc.rom) await removeRomFile(doc.rom.fileId);
+  if (doc.rom) {
+    await removeRomFile(doc.rom.fileId);
+    await dropCached(doc.rom.sha256);
+  }
   await games.updateOne({ slug }, { $set: { rom: null, updatedAt: new Date() } });
 
   const updated = await games.findOne({ slug });
@@ -223,11 +234,25 @@ export async function openRom(slug: string): Promise<RomStream | null> {
   const doc = await games.findOne({ slug });
   if (!doc?.rom) return null;
 
+  const { fileName, size, sha256 } = doc.rom;
+
+  // Served before? Then it is already on local disk, and we can skip the
+  // ~300ms round-trip to Atlas entirely.
+  const cached = await readCached(sha256);
+  if (cached) return { stream: cached, fileName, size, sha256 };
+
+  // First time: pull it down whole so it can be cached. ROMs are small — a
+  // NES title is a few hundred KB, and the largest system we support tops out
+  // in the tens of MB — so buffering one is cheaper than teeing the stream.
   const bucket = await getRomBucket();
-  return {
-    stream: bucket.openDownloadStream(doc.rom.fileId),
-    fileName: doc.rom.fileName,
-    size: doc.rom.size,
-    sha256: doc.rom.sha256,
-  };
+  const chunks: Buffer[] = [];
+  const download = bucket.openDownloadStream(doc.rom.fileId);
+  for await (const chunk of download) chunks.push(chunk as Buffer);
+  const data = Buffer.concat(chunks);
+
+  // Cache only what arrived intact. A short read here would otherwise be
+  // frozen into the cache and served as a complete ROM from then on.
+  if (data.length === size) void writeCached(sha256, data);
+
+  return { stream: Readable.from(data), fileName, size, sha256 };
 }

@@ -73,6 +73,20 @@ pass may want to define on first use.
 ### Loading spinner
 Used on every async page. No accompanying text except on `/play`.
 
+### Sign-in gate
+Renders over every page until the visitor signs in — including invite links,
+which keep their URL so the room is waiting the moment sign-in completes.
+
+Logo / **Sign in to Coophile** / "Play retro games with friends. Signing in keeps
+your controls and your rooms tied to you." / `Continue with Google`
+Footnote: "Emulator software is lawful; distributing copyrighted ROMs is not.
+Whoever runs this server is responsible for its library."
+
+Misconfigured server: 🔑 / **Sign-in is not configured** / "This server has no
+Firebase credentials, so nobody can sign in. Set `FIREBASE_SERVICE_ACCOUNT` and
+the `NEXT_PUBLIC_FIREBASE_*` values, then restart." / "See `.env.example` for the
+full list."
+
 ---
 
 ## 5. Landing page — `/`
@@ -283,11 +297,13 @@ Server-side: "No room with code `{CODE}`." · "That room is already full." · "L
 ## 9. Admin — `/admin`
 
 ### 9.1 Sign in
-**Admin sign in** / "Enter the shared `ADMIN_TOKEN`." / password field `Token` / `Sign in` / `Checking…`
-Error: "That token is not correct."
+Handled by the site-wide gate — see §4. Reaching `/admin` while signed out shows
+the same Google sign-in card as everywhere else.
 
-### 9.2 Disabled
-🔒 / **Admin is disabled** / "Set `ADMIN_TOKEN` in the environment and restart to enable the admin panel."
+### 9.2 Not an admin
+🔒 / **Admins only** / "You are signed in as `{email}`, which is not on the admin allowlist."
+/ "Add the address to `ADMIN_EMAILS` in the environment and restart, or sign in with an account that is already listed."
+/ `Sign in with a different account`
 
 ### 9.3 Panel header
 **ADMIN** · `{n} games in the catalog` · `View library →` · `Sign out`

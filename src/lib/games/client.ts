@@ -27,23 +27,6 @@ export function romUrl(slug: string): string {
 
 // ── Admin ────────────────────────────────────────────────────────
 
-export async function adminStatus(): Promise<{ enabled: boolean; signedIn: boolean }> {
-  return unwrap(await fetch('/api/admin/session'));
-}
-
-export async function adminSignIn(token: string): Promise<void> {
-  await unwrap(
-    await fetch('/api/admin/session', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token }),
-    }),
-  );
-}
-
-export async function adminSignOut(): Promise<void> {
-  await unwrap(await fetch('/api/admin/session', { method: 'DELETE' }));
-}
 
 export async function adminCreateGame(input: GameInput): Promise<Game> {
   const data = await unwrap<{ game: Game }>(

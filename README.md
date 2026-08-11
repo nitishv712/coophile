@@ -19,30 +19,28 @@ Player A browser                            Player B browser
         |        (inputs, ~ms latency)               |
         \--------------\        /-------------------/
                         \      /
-                  Signaling server (Node.js + ws)
+                        LiveKit room
                   Rooms, room codes, SDP/ICE relay
 ```
 
-The signaling server only performs the introduction. Once the data channel is
-open it is out of the loop entirely — killing it mid-session does not interrupt
-a connected game.
+LiveKit only performs the introduction. Once the direct data channel is open it
+is out of the loop entirely — gameplay inputs never touch it, so its latency
+does not affect play.
 
 ## Running locally
 
 ```bash
 npm install
-cp .env.example .env.local   # then set MONGODB_URI and ADMIN_TOKEN
+cp .env.example .env.local   # then set MONGODB_URI, Firebase, and ADMIN_EMAILS
 npm run dev
 ```
 
-That is the whole system — database, signaling server, and web app — started in
-dependency order and shut down together with Ctrl-C.
+That is the whole system — database and web app — started in dependency order
+and shut down together with Ctrl-C.
 
 ```
 Coophile (development)
 │ mongo  using remote database mongodb+srv://<credentials>@cluster0...
-│ signal starting on port 3001
-│ signal ready
 │ web    starting dev server
 
   Ready  http://localhost:3000
@@ -63,16 +61,19 @@ first). The pieces can still be run on their own:
 
 ```bash
 npm run dev:web   # Next.js only
-npm run signal    # signaling server only
 npm run mongo     # local database only
 ```
 
-Set `ADMIN_TOKEN` to enable `/admin`. With it unset, admin is disabled outright
-in production and falls back to the token `dev` locally. Generate one with:
+## Signing in
 
-```bash
-node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
-```
+Everyone signs in with Google before they can browse the shelf, play, or join a
+netplay room. Create a Firebase project, enable the Google provider, and fill in
+the `NEXT_PUBLIC_FIREBASE_*` values plus `FIREBASE_SERVICE_ACCOUNT` — the
+comments in `.env.example` walk through where each one comes from.
+
+Admins are named individually rather than sharing a password: list the Google
+addresses allowed into `/admin` in `ADMIN_EMAILS`, comma-separated. An empty
+list grants nobody, so set it before expecting the panel to open.
 
 ## The game library
 
@@ -114,7 +115,7 @@ gets emulator projects taken down.
    code and an invite link.
 3. Open the invite link in a second browser. Both sides pull the same ROM from
    the server, so there is nothing for the other player to install.
-4. Watch the four connection steps go green: signaling → room → peer → data
+4. Watch the four connection steps go green: LiveKit → room → peer → data
    channel. The chat box, latency readout, and ROM-match verdict confirm the
    link is live.
 
@@ -124,17 +125,19 @@ The lobby shows the address to share. **Do not send a `localhost` link** — tha
 points at the other person's own computer, so they will never find your room.
 
 **Same network (same WiFi):** share the address the lobby offers, e.g.
-`http://192.168.1.33:3000/lobby?room=ABC123`. Both the app port (3000) and the
-signaling port (3001) must be reachable, so check any local firewall.
+`http://192.168.1.33:3000/lobby?room=ABC123`. Only the app port (3000) needs to
+be reachable, so check any local firewall.
+
+Whichever address you share must also be listed under Firebase Authentication →
+Settings → Authorized domains, or the guest cannot sign in.
 
 **Different networks:** a LAN address will not reach them. Expose the machine
 with a tunnel (`cloudflared tunnel --url http://localhost:3000`, `ngrok http
-3000`, or similar) or deploy it, then set `NEXT_PUBLIC_SIGNALING_URL` so the
-browser knows where signaling lives — the default guesses port 3001 on the
-current hostname, which a tunnel will not forward.
+3000`, or similar) or deploy it, and add that hostname to the authorized domains
+too.
 
-Note that `NEXT_PUBLIC_*` values are baked in at build time, so change it before
-`npm run build`.
+Note that `NEXT_PUBLIC_*` values are baked in at build time, so change them
+before `npm run build`.
 
 On plain http the browser blocks clipboard access, so the invite link is always
 shown as selectable text under the Copy button.
@@ -152,17 +155,13 @@ shown as selectable text under the Copy button.
 | `src/lib/emulator/` | EmulatorJS wrapper, input capture, system definitions |
 | `src/lib/games/` | Game schema, validation, Mongo repository, API client |
 | `src/lib/db/` | MongoDB connection and GridFS bucket |
-| `src/lib/auth/` | Admin token and session handling |
-| `src/lib/net/` | Signaling client, WebRTC peer, netplay session |
-| `server/signaling.mjs` | Standalone signaling server (no build step) |
-
-The signaling server is plain `.mjs` so it can be deployed on its own. Its wire
-protocol is mirrored in `src/lib/net/protocol.ts` — keep the two in sync by hand.
+| `src/lib/auth/` | Firebase sign-in, session cookies, admin allowlist |
+| `src/lib/net/` | LiveKit session, direct WebRTC peer, wire protocol |
 
 ## Status
 
 - [x] **Solo emulation** — ROM loading, input mapping, save states
-- [x] **Signaling + handshake** — rooms, room codes, WebRTC data channel
+- [x] **Signaling + handshake** — LiveKit rooms, room codes, direct data channel
 - [x] **Game library** — MongoDB catalog, admin panel, GridFS ROM hosting,
       server-side fingerprinting and ROM-match verification
 - [ ] **Lockstep sync** — exchange inputs per frame, delay local rendering a few

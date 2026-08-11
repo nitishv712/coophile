@@ -1,4 +1,4 @@
-import { withAdmin } from '@/src/lib/auth/admin';
+import { withAdminUser } from '@/src/lib/auth/firebaseAdmin';
 import { deleteGame, updateGame, SlugTakenError } from '@/src/lib/games/repository';
 import { validateGameInput } from '@/src/lib/games/types';
 import { dbErrorResponse } from '@/src/lib/db/errors';
@@ -9,7 +9,7 @@ export async function PATCH(
 ) {
   const { slug } = await params;
 
-  return withAdmin(async () => {
+  return withAdminUser(async () => {
     let body: unknown;
     try {
       body = await request.json();
@@ -41,7 +41,7 @@ export async function DELETE(
 ) {
   const { slug } = await params;
 
-  return withAdmin(async () => {
+  return withAdminUser(async () => {
     try {
       const removed = await deleteGame(slug);
       if (!removed) return Response.json({ error: 'No such game.' }, { status: 404 });

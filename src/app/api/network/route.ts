@@ -1,4 +1,5 @@
 import { networkInterfaces } from 'node:os';
+import { withUser } from '@/src/lib/auth/firebaseAdmin';
 
 /**
  * Addresses this server can be reached on from other machines.
@@ -32,19 +33,21 @@ function lanAddresses(): string[] {
 }
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const host = request.headers.get('host') ?? url.host;
-  const port = host.includes(':') ? host.split(':').pop()! : url.protocol === 'https:' ? '443' : '80';
-  const scheme = url.protocol === 'https:' ? 'https:' : 'http:';
+  return withUser(async () => {
+    const url = new URL(request.url);
+    const host = request.headers.get('host') ?? url.host;
+    const port = host.includes(':') ? host.split(':').pop()! : url.protocol === 'https:' ? '443' : '80';
+    const scheme = url.protocol === 'https:' ? 'https:' : 'http:';
 
-  const addresses = lanAddresses();
-  const defaultPort = scheme === 'https:' ? '443' : '80';
-  const suffix = port === defaultPort ? '' : `:${port}`;
+    const addresses = lanAddresses();
+    const defaultPort = scheme === 'https:' ? '443' : '80';
+    const suffix = port === defaultPort ? '' : `:${port}`;
 
-  return Response.json({
-    /** Origins another machine on the same network can open. */
-    origins: addresses.map((address) => `${scheme}//${address}${suffix}`),
-    /** What the browser currently thinks it is talking to. */
-    host,
+    return Response.json({
+      /** Origins another machine on the same network can open. */
+      origins: addresses.map((address) => `${scheme}//${address}${suffix}`),
+      /** What the browser currently thinks it is talking to. */
+      host,
+    });
   });
 }

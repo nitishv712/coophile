@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import SiteNav from "@/src/components/SiteNav";
+import { useAuth } from "@/src/components/AuthProvider";
 import SiteFooter from "@/src/components/SiteFooter";
 import CartridgeArt from "@/src/components/CartridgeArt";
 import { SYSTEMS, type SystemType } from "@/src/lib/emulator/types";
@@ -21,9 +22,6 @@ import {
   adminCreateGame,
   adminDeleteGame,
   adminRemoveRom,
-  adminSignIn,
-  adminSignOut,
-  adminStatus,
   adminUpdateGame,
   adminUploadRom,
   fetchGames,
@@ -54,10 +52,11 @@ const label =
   "block font-label text-[11px] uppercase tracking-[0.15em] text-on-surface-variant mb-1.5 font-semibold";
 
 export default function AdminPage() {
-  const [enabled, setEnabled] = useState(true);
-  const [signedIn, setSignedIn] = useState(false);
-  const [checking, setChecking] = useState(true);
-  const [token, setToken] = useState("");
+  // Identity comes from the Google session. <SignInGate> has already ensured
+  // somebody is signed in by the time this renders; all that is left to check
+  // is whether that somebody is on the admin allowlist.
+  const { user, loading: checking, signOut } = useAuth();
+  const isAdmin = user?.isAdmin === true;
 
   const [games, setGames] = useState<Game[]>([]);
   const [draft, setDraft] = useState<GameInput>(BLANK);
@@ -75,18 +74,6 @@ export default function AdminPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  useEffect(() => {
-    adminStatus()
-      .then((status) => {
-        setEnabled(status.enabled);
-        setSignedIn(status.signedIn);
-      })
-      .catch((cause: unknown) =>
-        setError(cause instanceof Error ? cause.message : String(cause)),
-      )
-      .finally(() => setChecking(false));
-  }, []);
-
   const reload = useCallback(async () => {
     try {
       setGames(await fetchGames());
@@ -98,7 +85,7 @@ export default function AdminPage() {
   // Load the catalog once signed in. Written as a promise chain so the state
   // updates land in callbacks rather than synchronously in the effect body.
   useEffect(() => {
-    if (!signedIn) return;
+    if (!isAdmin) return;
     let cancelled = false;
     fetchGames()
       .then((found) => {
@@ -110,7 +97,7 @@ export default function AdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [signedIn]);
+  }, [isAdmin]);
 
   const run = useCallback(async (job: () => Promise<void>, done?: string) => {
     setBusy(true);
@@ -249,7 +236,11 @@ export default function AdminPage() {
     );
   }
 
-  if (!enabled) {
+  // The gate above this page already guarantees a signed-in Google account, so
+  // the only remaining question is the allowlist. Show who is actually signed
+  // in — "access denied" while logged into the wrong Google account is a
+  // genuinely confusing state otherwise.
+  if (!isAdmin) {
     return (
       <>
         <SiteNav />
@@ -257,90 +248,23 @@ export default function AdminPage() {
           <span className="material-symbols-outlined text-6xl text-on-surface-variant/40 mb-6">
             lock
           </span>
-          <h1 className="font-headline text-3xl font-bold mb-3">Admin is disabled</h1>
-          <p className="font-body text-on-surface-variant max-w-md leading-relaxed">
-            Set <code className="font-mono text-primary">ADMIN_TOKEN</code> in the
-            environment and restart to enable the admin panel.
+          <h1 className="font-headline text-3xl font-bold mb-3">Admins only</h1>
+          <p className="font-body text-on-surface-variant max-w-md leading-relaxed mb-2">
+            You are signed in as{" "}
+            <span className="font-mono text-on-surface">{user?.email ?? "an unknown account"}</span>
+            , which is not on the admin allowlist.
           </p>
-        </div>
-      </>
-    );
-  }
-
-  if (!signedIn) {
-    return (
-      <>
-        <SiteNav />
-        <div className="flex-grow flex flex-col items-center justify-center px-6">
-          <div className="card p-8 w-full max-w-sm">
-          <h1 className="font-headline text-2xl font-bold mb-1">Admin sign in</h1>
-          <p className="font-body text-sm text-on-surface-variant mb-6">
-            Enter the shared <code className="font-mono">ADMIN_TOKEN</code>.
+          <p className="font-body text-sm text-on-surface-variant/70 max-w-md leading-relaxed mb-8">
+            Add the address to <code className="font-mono text-primary">ADMIN_EMAILS</code> in the
+            environment and restart, or sign in with an account that is already listed.
           </p>
-          {error && (
-            <p
-              id="admin-error"
-              className="font-body text-sm text-on-error-container bg-error-container rounded-lg px-3 py-2 mb-4"
-            >
-              {error}
-            </p>
-          )}
-          <input
-            id="admin-token"
-            type="password"
-            value={token}
-            onChange={(event) => setToken(event.target.value)}
-            onKeyDown={(event) =>
-              event.key === "Enter" &&
-              run(async () => {
-                await adminSignIn(token);
-                // Confirm the cookie actually stuck before showing the panel.
-                // A 200 here only means the token was right — the browser can
-                // still drop the cookie (e.g. a Secure cookie on a plain-http
-                // origin), which would leave the panel rendered but every
-                // action 401ing.
-                const status = await adminStatus();
-                if (!status.signedIn) {
-                  throw new Error(
-                    'Signed in, but the browser did not keep the session cookie. ' +
-                      'This usually means the page is served over plain http from a ' +
-                      'non-localhost address; use https, or open it via localhost.',
-                  );
-                }
-                setSignedIn(true);
-              })
-            }
-            placeholder="Token"
-            className="field mb-4"
-            autoComplete="current-password"
-          />
           <button
-            id="btn-admin-signin"
-            disabled={busy || token.length === 0}
-            onClick={() =>
-              run(async () => {
-                await adminSignIn(token);
-                // Confirm the cookie actually stuck before showing the panel.
-                // A 200 here only means the token was right — the browser can
-                // still drop the cookie (e.g. a Secure cookie on a plain-http
-                // origin), which would leave the panel rendered but every
-                // action 401ing.
-                const status = await adminStatus();
-                if (!status.signedIn) {
-                  throw new Error(
-                    'Signed in, but the browser did not keep the session cookie. ' +
-                      'This usually means the page is served over plain http from a ' +
-                      'non-localhost address; use https, or open it via localhost.',
-                  );
-                }
-                setSignedIn(true);
-              })
-            }
-            className="btn-primary w-full text-sm py-3 disabled:opacity-40"
+            id="btn-admin-switch-account"
+            onClick={() => void signOut()}
+            className="btn-secondary text-sm px-6 py-3"
           >
-            {busy ? "Checking…" : "Sign in"}
+            Sign in with a different account
           </button>
-          </div>
         </div>
       </>
     );
@@ -367,12 +291,7 @@ export default function AdminPage() {
           </div>
           <button
             id="btn-admin-signout"
-            onClick={() =>
-              run(async () => {
-                await adminSignOut();
-                setSignedIn(false);
-              })
-            }
+            onClick={() => void signOut()}
             className="btn-secondary text-xs px-5 py-2.5"
           >
             Sign out

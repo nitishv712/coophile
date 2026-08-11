@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, Noto_Serif, Public_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import AuthProvider from "@/src/components/AuthProvider";
+import SignInGate from "@/src/components/SignInGate";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -56,7 +58,9 @@ export default function RootLayout({
         />
       </head>
       <body className="font-body bg-surface text-on-surface min-h-screen flex flex-col antialiased">
-        {children}
+        <AuthProvider>
+          <SignInGate>{children}</SignInGate>
+        </AuthProvider>
       </body>
     </html>
   );

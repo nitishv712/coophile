@@ -1,4 +1,4 @@
-import { withAdmin } from '@/src/lib/auth/admin';
+import { withAdminUser } from '@/src/lib/auth/firebaseAdmin';
 import { attachRom, detachRom, RomRejectedError } from '@/src/lib/games/repository';
 import { dbErrorResponse } from '@/src/lib/db/errors';
 
@@ -15,7 +15,7 @@ export async function POST(
 ) {
   const { slug } = await params;
 
-  return withAdmin(async () => {
+  return withAdminUser(async () => {
     let file: File | null = null;
     try {
       const form = await request.formData();
@@ -49,7 +49,7 @@ export async function DELETE(
 ) {
   const { slug } = await params;
 
-  return withAdmin(async () => {
+  return withAdminUser(async () => {
     try {
       const game = await detachRom(slug);
       if (!game) return Response.json({ error: 'No such game.' }, { status: 404 });

@@ -1,11 +1,11 @@
-import { withAdmin } from '@/src/lib/auth/admin';
+import { withAdminUser } from '@/src/lib/auth/firebaseAdmin';
 import { createGame, listGames, SlugTakenError } from '@/src/lib/games/repository';
 import { validateGameInput } from '@/src/lib/games/types';
 import { dbErrorResponse } from '@/src/lib/db/errors';
 
 /** Same data as the public route, but only for signed-in admins. */
 export async function GET() {
-  return withAdmin(async () => {
+  return withAdminUser(async () => {
     try {
       return Response.json({ games: await listGames() });
     } catch (error) {
@@ -15,7 +15,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  return withAdmin(async () => {
+  return withAdminUser(async () => {
     let body: unknown;
     try {
       body = await request.json();
