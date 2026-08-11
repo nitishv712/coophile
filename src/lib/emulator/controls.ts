@@ -221,3 +221,84 @@ export function displayKey(value: string): string {
   };
   return symbols[value] ?? value.toUpperCase();
 }
+
+// ── Netplay ────────────────────────────────────────────────────────
+
+/**
+ * A second key channel, used only for input arriving from the remote player.
+ *
+ * EmulatorJS reads keyboard events off its container element, so a remote
+ * player's button press can be replayed locally as a synthetic KeyboardEvent.
+ * Those synthetic presses need keys distinct from the ones the local player
+ * actually holds, otherwise the two would be indistinguishable. Numpad keys
+ * are ideal: EmulatorJS recognises them, and essentially nobody presses them
+ * mid-game (many laptops lack the keys entirely).
+ *
+ * `keyCode` matters as much as `value` — EmulatorJS keys its lookup table by
+ * keyCode, so a dispatched event must carry the matching one.
+ */
+export const REMOTE_KEYS: Record<ButtonSlot, { value: string; keyCode: number }> = {
+  A: { value: 'numpad 1', keyCode: 97 },
+  B: { value: 'numpad 2', keyCode: 98 },
+  X: { value: 'numpad 3', keyCode: 99 },
+  Y: { value: 'numpad 4', keyCode: 100 },
+  SELECT: { value: 'numpad 5', keyCode: 101 },
+  START: { value: 'numpad 6', keyCode: 102 },
+  UP: { value: 'numpad 7', keyCode: 103 },
+  DOWN: { value: 'numpad 8', keyCode: 104 },
+  LEFT: { value: 'numpad 9', keyCode: 105 },
+  RIGHT: { value: 'numpad 0', keyCode: 96 },
+  L: { value: 'multiply', keyCode: 106 },
+  R: { value: 'add', keyCode: 107 },
+  L2: { value: 'subtract', keyCode: 109 },
+  R2: { value: 'divide', keyCode: 111 },
+};
+
+/** Who this browser's local player is. The host drives player 1. */
+export type NetplayRole = 'host' | 'guest';
+
+/**
+ * Which button the local player just pressed, or null if the key is unbound.
+ * Used to decide what to relay to the other side.
+ */
+export function slotForKeyEvent(
+  mapping: KeyMapping,
+  event: KeyboardEvent,
+): ButtonSlot | null {
+  const pressed = keyEventToEjsValue(event);
+  for (const slot of BUTTON_ORDER) {
+    if (resolvedKey(mapping, slot).toLowerCase() === pressed.toLowerCase()) return slot;
+  }
+  return null;
+}
+
+/**
+ * Control table for a netplay session.
+ *
+ * Both players keep their own familiar keys locally; the difference is which
+ * controller those keys drive. On the host, local keys are player 1 and the
+ * injected remote keys are player 2 — on the guest, exactly reversed. That way
+ * neither player has to learn a second layout, and each emulator still ends up
+ * receiving both players' inputs on the correct controller.
+ */
+export function buildNetplayControls(
+  mapping: KeyMapping,
+  role: NetplayRole,
+): Record<number, Record<number, { value: string; value2?: string }>> {
+  // Start from the full 0-29 table: a sparse object crashes EmulatorJS's own
+  // control-menu setup (same trap as `buildDefaultControls`).
+  const local: Record<number, { value: string; value2?: string }> = { ...FULL_DEFAULTS };
+  const remote: Record<number, { value: string; value2?: string }> = { ...FULL_DEFAULTS };
+
+  for (const slot of BUTTON_ORDER) {
+    const info = BUTTON_SLOTS[slot];
+    local[info.index] = { value: resolvedKey(mapping, slot), value2: info.gamepad };
+    remote[info.index] = { value: REMOTE_KEYS[slot].value, value2: info.gamepad };
+  }
+
+  // Player slots 3 and 4 stay present but empty — EmulatorJS's own defaults
+  // always include all four, and a sparse object crashes its control setup.
+  return role === 'host'
+    ? { 0: local, 1: remote, 2: {}, 3: {} }
+    : { 0: remote, 1: local, 2: {}, 3: {} };
+}

@@ -13,7 +13,9 @@ import SiteNav from "@/src/components/SiteNav";
 import SiteFooter from "@/src/components/SiteFooter";
 import { NetplaySession, type NetplayState } from "@/src/lib/net/NetplaySession";
 import type { Game } from "@/src/lib/games/types";
-import { fetchGame } from "@/src/lib/games/client";
+import { fetchGame, romUrl as romEndpoint } from "@/src/lib/games/client";
+import EmulatorCanvas, { type EmulatorCanvasHandle } from "@/src/components/EmulatorCanvas";
+import type { ButtonSlot } from "@/src/lib/emulator/controls";
 
 type Mode = "choose" | "hosting" | "joining";
 
@@ -29,11 +31,11 @@ interface PeerGame {
   romHash: string | null;
 }
 
-/** The four things that have to succeed before gameplay traffic can flow. */
+/** The steps that have to succeed before gameplay traffic can flow. */
 function connectionSteps(state: NetplayState) {
   return [
     {
-      label: "Signaling server",
+      label: "LiveKit",
       done: state.signaling === "connected",
       pending: state.signaling === "connecting",
       detail: state.signaling,
@@ -43,12 +45,6 @@ function connectionSteps(state: NetplayState) {
       done: Boolean(state.roomCode),
       pending: false,
       detail: state.roomCode ?? "waiting",
-    },
-    {
-      label: "Peer connection",
-      done: state.peer === "connected",
-      pending: state.peer === "connecting",
-      detail: state.peer,
     },
     {
       label: "Data channel",
@@ -86,6 +82,12 @@ function LobbyContent() {
   const [draft, setDraft] = useState("");
   const chatIdRef = useRef(0);
 
+  // Netplay runs inside the lobby rather than on /play: the LiveKit session is
+  // owned by this component, so navigating away would tear down the very
+  // connection the game depends on.
+  const [playing, setPlaying] = useState(false);
+  const canvasRef = useRef<EmulatorCanvasHandle>(null);
+
   // Which catalog game this session is for, if launched from the library.
   const gameId = searchParams.get("game");
   const [game, setGame] = useState<Game | null>(null);
@@ -120,6 +122,14 @@ function LobbyContent() {
       }
       if (message.t === "hello") {
         setPeerGame({ gameId: message.gameId, romHash: message.romHash });
+      }
+      // The host decides when play begins, so both cores boot together.
+      if (message.t === "start") {
+        setPlaying(true);
+      }
+      // Replay the peer's button transition on their controller.
+      if (message.t === "input") {
+        canvasRef.current?.sendRemoteInput(message.slot as ButtonSlot, message.down);
       }
     });
     return stop;
@@ -193,7 +203,15 @@ function LobbyContent() {
 
   const linkOrigin =
     shareOrigin ?? (typeof window !== "undefined" ? window.location.origin : "");
-  const inviteLink = state.roomCode ? `${linkOrigin}/lobby?room=${state.roomCode}` : "";
+  /**
+   * Carry the game through the invite, not just the room code. Without it the
+   * guest lands in the right room with no game loaded, and both sides then
+   * report a ROM mismatch that is really just missing context.
+   */
+  const inviteLink = state.roomCode
+    ? `${linkOrigin}/lobby?room=${state.roomCode}` +
+      (gameId ? `&game=${encodeURIComponent(gameId)}` : "")
+    : "";
   /** True when we have nothing shareable to offer — the link is local-only. */
   const linkIsLocalOnly = onLocalhost && !shareOrigin;
 
@@ -215,6 +233,19 @@ function LobbyContent() {
     }
   }, [inviteLink]);
 
+  const startGame = useCallback(() => {
+    if (!gameId) return;
+    session.send({ t: "start", gameId });
+    setPlaying(true);
+  }, [session, gameId]);
+
+  const relayLocalInput = useCallback(
+    (slot: ButtonSlot, down: boolean) => {
+      session.send({ t: "input", slot, down });
+    },
+    [session],
+  );
+
   const handleSend = useCallback(() => {
     const text = draft.trim();
     if (!text || !state.channelOpen) return;
@@ -235,19 +266,28 @@ function LobbyContent() {
     ? null
     : !peerGame
       ? "pending"
-      : peerGame.gameId !== gameId
-        ? "different-game"
-        : !localHash || !peerGame.romHash
-          ? "unknown"
-          : peerGame.romHash === localHash
-            ? "match"
-            : "mismatch";
+      : // No game at all on their side is a different problem from a
+        // different game, and needs different advice.
+        !peerGame.gameId
+        ? "peer-has-no-game"
+        : peerGame.gameId !== gameId
+          ? "different-game"
+          : !localHash || !peerGame.romHash
+            ? "unknown"
+            : peerGame.romHash === localHash
+              ? "match"
+              : "mismatch";
 
   const romMatchCopy: Record<string, { icon: string; tone: string; text: string }> = {
     pending: {
       icon: "hourglass_empty",
       tone: "text-on-surface-variant",
       text: "Waiting for the other player to report their ROM…",
+    },
+    "peer-has-no-game": {
+      icon: "link",
+      tone: "text-tertiary",
+      text: `Your opponent joined without a game loaded. Send them the invite link above — it now carries ${game?.title ?? "the game"} with it.`,
     },
     "different-game": {
       icon: "error",
@@ -285,8 +325,8 @@ function LobbyContent() {
             NETPLAY LOBBY
           </h1>
           <p className="font-body text-lg text-on-surface-variant max-w-3xl leading-relaxed">
-            Open a direct peer-to-peer link with a friend. Gameplay traffic goes
-            browser to browser — the server only introduces you.
+            Open a direct peer-to-peer link with a friend. Once connected, gameplay
+            goes browser to browser — the server only introduces you.
           </p>
         </header>
 
@@ -522,15 +562,83 @@ function LobbyContent() {
                       {state.channelOpen ? "PEER CONNECTED" : "WAITING FOR PEER"}
                     </h3>
                   </div>
-                  {state.rttMs !== null && (
-                    <span
-                      id="rtt-readout"
-                      className="font-mono text-xs text-on-surface-variant bg-surface-container-high px-3 py-1 rounded-full shrink-0"
-                    >
-                      PING: {state.rttMs}ms
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {state.channelOpen && (
+                      <span
+                        id="transport-readout"
+                        data-transport={state.transport}
+                        title={
+                          state.transport === "direct"
+                            ? "Input goes straight between browsers"
+                            : "Relayed through the LiveKit server — higher latency"
+                        }
+                        className={`font-label text-[10px] tracking-widest uppercase px-2 py-1 rounded-full ${
+                          state.transport === "direct"
+                            ? "bg-primary/10 text-primary"
+                            : "bg-tertiary/10 text-tertiary"
+                        }`}
+                      >
+                        {state.transport === "direct" ? "direct p2p" : "relayed"}
+                      </span>
+                    )}
+                    {state.rttMs !== null && (
+                      <span
+                        id="rtt-readout"
+                        className="font-mono text-xs text-on-surface-variant bg-surface-container-high px-3 py-1 rounded-full"
+                      >
+                        PING: {state.rttMs}ms
+                      </span>
+                    )}
+                  </div>
                 </div>
+
+                {/* Game area — the emulator lives here rather than on /play so
+                    the LiveKit session that carries input stays alive. */}
+                {playing && game?.rom && (
+                  <div
+                    id="netplay-game"
+                    className="relative bg-inverse-surface"
+                    style={{ minHeight: 420 }}
+                  >
+                    <EmulatorCanvas
+                      ref={canvasRef}
+                      system={game.system}
+                      romUrl={romEndpoint(game.slug)}
+                      netplayRole={state.isHost ? "host" : "guest"}
+                      onLocalInput={relayLocalInput}
+                    />
+                    <p className="absolute bottom-2 left-3 font-mono text-[11px] text-inverse-on-surface/70 pointer-events-none">
+                      You are player {state.isHost ? 1 : 2}
+                    </p>
+                  </div>
+                )}
+
+                {/* Start control — only the host decides when play begins. */}
+                {!playing && state.channelOpen && game?.rom && (
+                  <div className="p-4 border-b border-outline-variant/15 flex items-center justify-between gap-4 flex-wrap">
+                    <p className="font-body text-sm text-on-surface-variant">
+                      {state.isHost
+                        ? "Both of you are connected — start when ready."
+                        : "Waiting for the host to start the game."}
+                    </p>
+                    {state.isHost && (
+                      <button
+                        id="btn-start-game"
+                        onClick={startGame}
+                        disabled={romMatch === "mismatch" || romMatch === "different-game"}
+                        className="btn-primary text-xs px-6 py-3 inline-flex items-center gap-2 disabled:opacity-40"
+                        title={
+                          romMatch === "mismatch" || romMatch === "different-game"
+                            ? "Both players need the same ROM first"
+                            : "Start the game for both players"
+                        }
+                      >
+                        <span className="material-symbols-outlined text-base">play_arrow</span>
+                        Start game
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {/* ROM verdict */}
                 {romMatch && state.channelOpen && (

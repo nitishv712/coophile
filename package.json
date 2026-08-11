@@ -7,16 +7,16 @@
     "start": "node server/dev.mjs --prod",
     "build": "next build",
     "dev:web": "next dev",
-    "signal": "node server/signaling.mjs",
     "mongo": "node server/dev-mongo.mjs",
     "lint": "eslint"
   },
   "dependencies": {
+    "livekit-client": "^2.21.0",
+    "livekit-server-sdk": "^2.17.0",
     "mongodb": "^7.5.0",
     "next": "16.2.12",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "ws": "^8.21.1",
     "yauzl": "^3.4.0"
   },
   "devDependencies": {

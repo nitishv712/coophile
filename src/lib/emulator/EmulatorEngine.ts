@@ -1,5 +1,11 @@
 import { EmulatorConfig, SYSTEMS } from './types';
-import { buildDefaultControls, loadKeyMapping } from './controls';
+import {
+  REMOTE_KEYS,
+  buildDefaultControls,
+  buildNetplayControls,
+  loadKeyMapping,
+  type ButtonSlot,
+} from './controls';
 
 /**
  * The slice of the EmulatorJS runtime this app actually touches. Save states
@@ -64,10 +70,15 @@ export class EmulatorEngine {
     window.EJS_color = '#00f0ff';  // Match our cyan accent
     window.EJS_backgroundBlur = true;
     window.EJS_backgroundColor = '#0a0b1e';  // Match our dark bg
-    // Only set this when there is an actual override: EmulatorJS's own
-    // control-menu setup indexes straight into whatever is here, and leaving
-    // it unset entirely is the safest way to get its own untouched defaults.
-    const controls = buildDefaultControls(loadKeyMapping());
+    // In netplay both controllers must be bound: the local player's own keys on
+    // one, and the remote key channel on the other. Solo, only set this when
+    // there is an actual override — EmulatorJS's control-menu setup indexes
+    // straight into whatever is here, so leaving it unset is the safest way to
+    // get its own untouched defaults.
+    const mapping = loadKeyMapping();
+    const controls = this.config.netplayRole
+      ? buildNetplayControls(mapping, this.config.netplayRole)
+      : buildDefaultControls(mapping);
     if (controls) window.EJS_defaultControls = controls;
     else delete window.EJS_defaultControls;
 
@@ -118,6 +129,29 @@ export class EmulatorEngine {
    */
   focusGame(): void {
     this.container.focus();
+  }
+
+  /**
+   * Replay a remote player's button transition into this emulator.
+   *
+   * EmulatorJS listens for keydown/keyup on its container rather than on
+   * window, so a synthetic event dispatched there is indistinguishable from a
+   * real press — verified against a running core. The remote key channel keeps
+   * these separate from whatever the local player is physically holding, and
+   * `keyCode` has to be right because EmulatorJS keys its lookup table by it.
+   */
+  sendRemoteInput(slot: ButtonSlot, down: boolean): void {
+    const remote = REMOTE_KEYS[slot];
+    if (!remote) return;
+    this.container.dispatchEvent(
+      new KeyboardEvent(down ? 'keydown' : 'keyup', {
+        key: remote.value,
+        keyCode: remote.keyCode,
+        which: remote.keyCode,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
   }
 
   /**

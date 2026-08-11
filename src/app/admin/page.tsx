@@ -294,6 +294,19 @@ export default function AdminPage() {
               event.key === "Enter" &&
               run(async () => {
                 await adminSignIn(token);
+                // Confirm the cookie actually stuck before showing the panel.
+                // A 200 here only means the token was right — the browser can
+                // still drop the cookie (e.g. a Secure cookie on a plain-http
+                // origin), which would leave the panel rendered but every
+                // action 401ing.
+                const status = await adminStatus();
+                if (!status.signedIn) {
+                  throw new Error(
+                    'Signed in, but the browser did not keep the session cookie. ' +
+                      'This usually means the page is served over plain http from a ' +
+                      'non-localhost address; use https, or open it via localhost.',
+                  );
+                }
                 setSignedIn(true);
               })
             }
@@ -307,6 +320,19 @@ export default function AdminPage() {
             onClick={() =>
               run(async () => {
                 await adminSignIn(token);
+                // Confirm the cookie actually stuck before showing the panel.
+                // A 200 here only means the token was right — the browser can
+                // still drop the cookie (e.g. a Secure cookie on a plain-http
+                // origin), which would leave the panel rendered but every
+                // action 401ing.
+                const status = await adminStatus();
+                if (!status.signedIn) {
+                  throw new Error(
+                    'Signed in, but the browser did not keep the session cookie. ' +
+                      'This usually means the page is served over plain http from a ' +
+                      'non-localhost address; use https, or open it via localhost.',
+                  );
+                }
                 setSignedIn(true);
               })
             }

@@ -25,7 +25,6 @@ loadEnvConfig(projectDir, true, { info: () => {}, error: () => {} });
 
 const production = process.argv.includes('--prod');
 const WEB_PORT = Number(process.env.PORT ?? 3000);
-const SIGNAL_PORT = Number(process.env.SIGNALING_PORT ?? 3001);
 const MONGODB_URI = process.env.MONGODB_URI ?? 'mongodb://127.0.0.1:27017';
 
 // ── Output ───────────────────────────────────────────────────────
@@ -37,7 +36,6 @@ const bold = (text) => paint('1', text);
 
 const LABELS = {
   mongo: '32', // green
-  signal: '35', // magenta
   web: '36', // cyan
   run: '33', // yellow
 };
@@ -169,16 +167,14 @@ async function main() {
 
   // Refuse to start on an occupied port. Silently attaching to a stale server
   // from a previous run is worse than failing: you end up testing old code.
-  for (const [name, port] of [['web app', WEB_PORT], ['signaling server', SIGNAL_PORT]]) {
-    if (await tcpOpen(port)) {
-      process.stderr.write(
-        `\n${bold('Port ' + port + ' is already in use')} (needed for the ${name}).\n` +
-          `Something is still running — probably a previous session.\n\n` +
-          `  Find it:  lsof -i :${port}    (or: ss -lptn 'sport = :${port}')\n` +
-          `  Stop it:  pkill -f next-server ; pkill -f signaling.mjs\n\n`,
-      );
-      process.exit(1);
-    }
+  if (await tcpOpen(WEB_PORT)) {
+    process.stderr.write(
+      `\n${bold('Port ' + WEB_PORT + ' is already in use')} (needed for the web app).\n` +
+        `Something is still running — probably a previous session.\n\n` +
+        `  Find it:  lsof -i :${WEB_PORT}    (or: ss -lptn 'sport = :${WEB_PORT}')\n` +
+        `  Stop it:  pkill -f next-server\n\n`,
+    );
+    process.exit(1);
   }
 
   // ── Database ───────────────────────────────────────────────────
@@ -195,11 +191,7 @@ async function main() {
     say('mongo', 'ready');
   }
 
-  // ── Signaling ──────────────────────────────────────────────────
-  say('signal', `starting on port ${SIGNAL_PORT}`);
-  start('signal', process.execPath, ['server/signaling.mjs']);
-  await waitFor('signaling server', () => httpOk(`http://127.0.0.1:${SIGNAL_PORT}/health`));
-  say('signal', 'ready');
+  // LiveKit handles signaling — no local server to start.
 
   // ── Web ────────────────────────────────────────────────────────
   const nextBin = 'node_modules/next/dist/bin/next';

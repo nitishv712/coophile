@@ -30,4 +30,9 @@ export interface EmulatorConfig {
   system: SystemType;
   romUrl: string;  // blob: URL or http URL to the ROM
   pathToData?: string;  // path to EmulatorJS data files
+  /**
+   * Set during netplay. Decides which controller the local player's keys drive
+   * and which one receives the remote player's injected input.
+   */
+  netplayRole?: 'host' | 'guest';
 }
