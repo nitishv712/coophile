@@ -30,10 +30,12 @@ does not affect play.
 ## Running locally
 
 ```bash
-npm install
-cp .env.example .env.local   # then set MONGODB_URI, Firebase, and ADMIN_EMAILS
-npm run dev
+./coophile setup    # creates .env.local, installs dependencies, checks the config
+./coophile dev
 ```
+
+`./coophile doctor` reports what is configured and what is still missing, and
+`./coophile help` lists every command.
 
 That is the whole system — database and web app — started in dependency order
 and shut down together with Ctrl-C.
@@ -74,6 +76,49 @@ comments in `.env.example` walk through where each one comes from.
 Admins are named individually rather than sharing a password: list the Google
 addresses allowed into `/admin` in `ADMIN_EMAILS`, comma-separated. An empty
 list grants nobody, so set it before expecting the panel to open.
+
+## Running in Docker
+
+```bash
+./coophile up              # build and start, using MongoDB Atlas
+./coophile up --local-db   # also run MongoDB in a container
+./coophile logs            # follow output
+./coophile down            # stop
+```
+
+The image is a three-stage build on `output: "standalone"`, so it ships only the
+dependencies actually reachable from the code and runs as an unprivileged user.
+Cached ROMs live on a named volume, which keeps them across restarts.
+
+One thing to be aware of: `NEXT_PUBLIC_*` values are compiled into the browser
+bundle, so they are passed as **build args** and changing one needs a rebuild —
+`./coophile up` rebuilds, `./coophile restart` does not. Everything secret (the
+Mongo URI, the Firebase service account, the LiveKit secret) is supplied at run
+time from `.env.local` and never enters the image.
+
+If Docker reports a permission error, your user is not in the `docker` group.
+`./coophile` will say so and print the fix.
+
+## Deploying to a server
+
+```bash
+./deploy.sh user@host --dry-run   # show every step without running it
+./deploy.sh user@host
+```
+
+The remote needs Docker with the compose v2 plugin and an account that can use
+it; nothing else is installed on it. The script ships the committed tree at the
+chosen ref with `git archive`, so a deploy never picks up stray local files —
+and it checks up front that the ref actually contains the Dockerfile and friends
+rather than letting the remote build fail minutes later.
+
+`.env.local` travels separately, written straight to mode 600, and is never part
+of the image. If the new container does not answer within 90 seconds the script
+prints the logs and rolls back to the previous image.
+
+Two things to sort out on the server side: the hostname must be listed under
+Firebase Authentication → Settings → Authorized domains, and the site needs
+https — Google refuses OAuth over plain http anywhere but localhost.
 
 ## The game library
 
@@ -157,6 +202,11 @@ shown as selectable text under the Copy button.
 | `src/lib/db/` | MongoDB connection and GridFS bucket |
 | `src/lib/auth/` | Firebase sign-in, session cookies, admin allowlist |
 | `src/lib/net/` | LiveKit session, direct WebRTC peer, wire protocol |
+| `coophile` | Control script — setup, dev, checks, Docker |
+| `deploy.sh` | Deploy to a remote host over SSH, with rollback |
+| `Dockerfile` | Three-stage production image on standalone output |
+| `compose.yaml` | Web service, optional local MongoDB, ROM-cache volume |
+| `server/dev.mjs` | One-command local runner (database + web app) |
 
 ## Status
 

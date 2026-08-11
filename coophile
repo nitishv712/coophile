@@ -1,0 +1,345 @@
+#!/usr/bin/env bash
+#
+# Coophile control script.
+#
+#   ./coophile help        list every command
+#
+# Local development still runs on the host (npm run dev) — it is faster than
+# bind-mounting a project into a container and Next.js reloads more reliably.
+# Docker is here for running the thing for real.
+
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+ENV_FILE=".env.local"
+EXAMPLE_FILE=".env.example"
+COMPOSE_PROJECT="coophile"
+
+# ── Output ───────────────────────────────────────────────────────
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'
+  GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RESET=$'\033[0m'
+else
+  BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; RESET=""
+fi
+
+say()  { printf '%s\n' "${DIM}│${RESET} $*"; }
+ok()   { printf '%s\n' "${GREEN}✓${RESET} $*"; }
+warn() { printf '%s\n' "${YELLOW}!${RESET} $*" >&2; }
+die()  { printf '%s\n' "${RED}✗${RESET} $*" >&2; exit 1; }
+
+# ── Prerequisites ────────────────────────────────────────────────
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "$1 is not installed."
+}
+
+need_docker() {
+  need docker
+  docker compose version >/dev/null 2>&1 \
+    || die "Docker Compose v2 is required (this is 'docker compose', not 'docker-compose')."
+
+  docker info >/dev/null 2>&1 && return 0
+
+  # "Cannot connect to the daemon" has two very different causes and two very
+  # different fixes, so work out which one this is rather than guessing.
+  local reason
+  reason=$(docker info 2>&1 || true)
+
+  if [[ "$reason" == *"permission denied"* ]]; then
+    printf '%s\n' "${RED}✗${RESET} No permission to use the Docker daemon." >&2
+    printf '%s\n' "  The daemon is running, but your user cannot reach its socket." >&2
+    printf '%s\n' "  Add yourself to the docker group, then log out and back in:" >&2
+    printf '%s\n\n' "    ${BOLD}sudo usermod -aG docker \$USER${RESET}" >&2
+    printf '%s\n' "  ${DIM}Note that docker group membership is equivalent to root on this${RESET}" >&2
+    printf '%s\n' "  ${DIM}machine. If you would rather not, prefix commands with sudo.${RESET}" >&2
+    exit 1
+  fi
+
+  die "Cannot reach the Docker daemon. Start it with: sudo systemctl start docker"
+}
+
+need_env() {
+  [[ -f "$ENV_FILE" ]] || die "No $ENV_FILE. Run './coophile setup' first."
+}
+
+# Read one value out of the env file without sourcing it — sourcing would
+# execute whatever happens to be in there, and would choke on values
+# containing spaces or '#'.
+env_value() {
+  local key="$1"
+  [[ -f "$ENV_FILE" ]] || return 0
+  sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1 | sed 's/^"//; s/"$//'
+}
+
+# ── Commands ─────────────────────────────────────────────────────
+
+cmd_setup() {
+  need node
+  need npm
+
+  if [[ -f "$ENV_FILE" ]]; then
+    say "$ENV_FILE already exists, leaving it alone."
+  else
+    [[ -f "$EXAMPLE_FILE" ]] || die "$EXAMPLE_FILE is missing."
+    cp "$EXAMPLE_FILE" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    ok "Created $ENV_FILE from $EXAMPLE_FILE (mode 600)."
+    warn "Fill in MONGODB_URI, the Firebase values, and ADMIN_EMAILS."
+  fi
+
+  if [[ -d node_modules ]]; then
+    say "Dependencies already installed."
+  else
+    say "Installing dependencies…"
+    npm install
+    ok "Dependencies installed."
+  fi
+
+  echo
+  cmd_doctor || true
+}
+
+cmd_doctor() {
+  local problems=0
+
+  printf '%s\n\n' "${BOLD}Configuration${RESET}"
+
+  if [[ ! -f "$ENV_FILE" ]]; then
+    warn "$ENV_FILE is missing — run './coophile setup'."
+    return 1
+  fi
+
+  local perms
+  perms=$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE" 2>/dev/null || echo "?")
+  if [[ "$perms" == "600" ]]; then
+    ok "$ENV_FILE is mode 600"
+  else
+    warn "$ENV_FILE is mode $perms — it holds secrets; 600 is safer."
+  fi
+
+  if git check-ignore -q "$ENV_FILE" 2>/dev/null; then
+    ok "$ENV_FILE is gitignored"
+  else
+    warn "$ENV_FILE is NOT gitignored — it would be committed."
+    problems=$((problems + 1))
+  fi
+
+  # Required, grouped by what breaks when they are missing.
+  local required=(
+    "MONGODB_URI:the catalog and ROM storage"
+    "NEXT_PUBLIC_FIREBASE_API_KEY:Google sign-in"
+    "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:Google sign-in"
+    "NEXT_PUBLIC_FIREBASE_PROJECT_ID:Google sign-in"
+    "FIREBASE_SERVICE_ACCOUNT:verifying sessions server-side"
+    "ADMIN_EMAILS:reaching /admin"
+  )
+  local optional=(
+    "LIVEKIT_API_KEY:netplay"
+    "LIVEKIT_API_SECRET:netplay"
+    "NEXT_PUBLIC_LIVEKIT_URL:netplay"
+  )
+
+  echo
+  local entry key purpose value
+  for entry in "${required[@]}"; do
+    key="${entry%%:*}"; purpose="${entry#*:}"
+    value=$(env_value "$key")
+    if [[ -n "$value" ]]; then
+      ok "$key"
+    else
+      warn "$key is empty — $purpose will not work."
+      problems=$((problems + 1))
+    fi
+  done
+
+  for entry in "${optional[@]}"; do
+    key="${entry%%:*}"; purpose="${entry#*:}"
+    value=$(env_value "$key")
+    [[ -n "$value" ]] && ok "$key" || say "${DIM}$key is empty — $purpose disabled.${RESET}"
+  done
+
+  # A container cannot reach a database on the host's loopback address.
+  local uri
+  uri=$(env_value "MONGODB_URI")
+  if [[ "$uri" == *"127.0.0.1"* || "$uri" == *"localhost"* ]]; then
+    echo
+    warn "MONGODB_URI points at localhost. That works on the host, but inside a"
+    warn "container it means the container itself. For './coophile up' use either"
+    warn "an Atlas URI or 'mongodb://mongo:27017' with --profile local-db."
+  fi
+
+  echo
+  if (( problems == 0 )); then
+    ok "${BOLD}Ready.${RESET}"
+  else
+    warn "${BOLD}$problems item(s) need attention.${RESET}"
+    return 1
+  fi
+}
+
+cmd_dev() {
+  need node
+  need_env
+  exec npm run dev
+}
+
+cmd_check() {
+  need npm
+  say "Type checking…"
+  npx tsc --noEmit
+  ok "Types clean."
+  say "Linting…"
+  npm run lint
+  say "Building…"
+  npm run build
+  ok "Build clean."
+}
+
+# Everything below shells out to compose. --env-file is what makes the
+# NEXT_PUBLIC_* build args resolve from .env.local rather than .env.
+compose() {
+  need_docker
+  need_env
+  docker compose --env-file "$ENV_FILE" -p "$COMPOSE_PROJECT" "$@"
+}
+
+# --profile local-db, but only when the user asked for it.
+profile_args() {
+  if [[ "${USE_LOCAL_DB:-0}" == "1" ]]; then
+    printf '%s\n' "--profile" "local-db"
+  fi
+}
+
+cmd_build() {
+  local -a profile; mapfile -t profile < <(profile_args)
+  say "Building image…"
+  compose "${profile[@]+"${profile[@]}"}" build "$@"
+  ok "Image built as coophile:local"
+}
+
+cmd_up() {
+  local -a profile; mapfile -t profile < <(profile_args)
+  compose "${profile[@]+"${profile[@]}"}" up -d --build "$@"
+  echo
+  local port; port=$(env_value "PORT"); port="${port:-3000}"
+  ok "Running on ${BOLD}http://localhost:${port}${RESET}"
+  say "Logs:  ./coophile logs"
+  say "Stop:  ./coophile down"
+}
+
+cmd_down() {
+  local -a profile; mapfile -t profile < <(profile_args)
+  compose "${profile[@]+"${profile[@]}"}" down "$@"
+  ok "Stopped."
+}
+
+cmd_restart() {
+  local -a profile; mapfile -t profile < <(profile_args)
+  compose "${profile[@]+"${profile[@]}"}" restart "$@"
+  ok "Restarted."
+}
+
+cmd_logs() {
+  local -a profile; mapfile -t profile < <(profile_args)
+  compose "${profile[@]+"${profile[@]}"}" logs -f --tail=100 "$@"
+}
+
+cmd_ps() {
+  local -a profile; mapfile -t profile < <(profile_args)
+  compose "${profile[@]+"${profile[@]}"}" ps "$@"
+}
+
+cmd_shell() {
+  compose exec web sh
+}
+
+cmd_clean() {
+  local -a profile; mapfile -t profile < <(profile_args)
+  warn "This removes the containers and the cached-ROM volume."
+  warn "Game records and ROM originals live in MongoDB and are NOT touched."
+  read -r -p "Continue? [y/N] " reply
+  [[ "$reply" =~ ^[Yy]$ ]] || { say "Cancelled."; return 0; }
+  compose "${profile[@]+"${profile[@]}"}" down -v
+  ok "Cleaned."
+}
+
+cmd_help() {
+  cat <<EOF
+${BOLD}Coophile${RESET} — browser-based retro multiplayer emulation
+
+${BOLD}USAGE${RESET}
+  ./coophile <command> [options]
+
+${BOLD}GETTING STARTED${RESET}
+  setup           Create $ENV_FILE, install dependencies, check the config
+  doctor          Report what is configured and what is missing
+
+${BOLD}DEVELOPMENT${RESET} ${DIM}(on the host — faster than in a container)${RESET}
+  dev             Run the dev server with hot reload
+  check           Type check, lint, and build
+
+${BOLD}DOCKER${RESET}
+  up              Build if needed and start in the background
+  down            Stop and remove the containers
+  restart         Restart without rebuilding
+  build           Build the image only
+  logs            Follow the logs
+  ps              Show container status
+  shell           Open a shell in the running web container
+  clean           Remove containers and the cached-ROM volume
+
+${BOLD}OPTIONS${RESET}
+  --local-db      Also run MongoDB in Docker, instead of using Atlas.
+                  Set MONGODB_URI=mongodb://mongo:27017 in $ENV_FILE to use it.
+
+${BOLD}EXAMPLES${RESET}
+  ./coophile setup                 first run
+  ./coophile dev                   develop locally
+  ./coophile up                    run the built image against Atlas
+  ./coophile up --local-db         run everything, database included
+  ./coophile logs web              follow just the web container
+
+${BOLD}NOTE${RESET}
+  NEXT_PUBLIC_* values are compiled into the browser bundle, so changing one
+  needs a rebuild ('./coophile up' does this) — a restart is not enough.
+EOF
+}
+
+# ── Dispatch ─────────────────────────────────────────────────────
+
+USE_LOCAL_DB=0
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    --local-db) USE_LOCAL_DB=1 ;;
+    *) args+=("$arg") ;;
+  esac
+done
+set -- "${args[@]+"${args[@]}"}"
+
+command="${1:-help}"
+shift || true
+
+case "$command" in
+  setup)              cmd_setup "$@" ;;
+  doctor|check-env)   cmd_doctor "$@" ;;
+  dev)                cmd_dev "$@" ;;
+  check)              cmd_check "$@" ;;
+  build)              cmd_build "$@" ;;
+  up|start)           cmd_up "$@" ;;
+  down|stop)          cmd_down "$@" ;;
+  restart)            cmd_restart "$@" ;;
+  logs)               cmd_logs "$@" ;;
+  ps|status)          cmd_ps "$@" ;;
+  shell|sh)           cmd_shell "$@" ;;
+  clean)              cmd_clean "$@" ;;
+  help|-h|--help)     cmd_help ;;
+  *)
+    printf '%s\n\n' "${RED}✗${RESET} Unknown command: $command" >&2
+    cmd_help >&2
+    exit 1
+    ;;
+esac

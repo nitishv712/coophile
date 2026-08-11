@@ -1,0 +1,59 @@
+# Coophile stack.
+#
+# Run it through ./coophile, which passes --env-file .env.local so that both
+# the NEXT_PUBLIC_* build args and the runtime secrets resolve from the same
+# file. Plain `docker compose up` reads .env instead and will build an image
+# with an empty Firebase config.
+
+name: coophile
+
+services:
+  web:
+    build:
+      context: .
+      args:
+        # Inlined into the browser bundle at build time. Changing any of these
+        # requires a rebuild, not just a restart.
+        NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY:-}
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-}
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-}
+        NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID:-}
+        NEXT_PUBLIC_LIVEKIT_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-}
+    image: coophile:local
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    # Secrets arrive here, at run time, and never touch the image.
+    env_file:
+      - .env.local
+    environment:
+      ROM_CACHE_DIR: /var/cache/coophile/roms
+    volumes:
+      # Survives restarts, so a redeploy does not make every player re-fetch
+      # every ROM across the internet again.
+      - rom-cache:/var/cache/coophile/roms
+    depends_on:
+      mongo:
+        condition: service_healthy
+        required: false
+
+  # Only starts with --profile local-db. With MongoDB Atlas configured in
+  # .env.local this stays out of the way.
+  mongo:
+    profiles: ["local-db"]
+    image: mongo:8
+    restart: unless-stopped
+    ports:
+      - "${MONGODB_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  rom-cache:
+  mongo-data:

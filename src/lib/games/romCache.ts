@@ -23,7 +23,14 @@ import type { Readable } from 'node:stream';
  * served and there is nothing to invalidate.
  */
 
-const CACHE_DIR = join(tmpdir(), 'coophile-roms');
+/**
+ * Where cached ROMs live.
+ *
+ * Overridable because the default is a temporary directory, which a container
+ * throws away on every restart. Pointing this at a mounted volume keeps the
+ * cache warm across redeploys.
+ */
+const CACHE_DIR = process.env.ROM_CACHE_DIR?.trim() || join(tmpdir(), 'coophile-roms');
 
 /** Beyond this the oldest entries are dropped. Roughly 200 NES-sized ROMs. */
 const MAX_BYTES = 512 * 1024 * 1024;
