@@ -1,15 +1,3 @@
-#!/usr/bin/env node
-/**
- * Runs the whole Coophile stack with one command: database, signaling server,
- * and web app, started in dependency order and shut down together.
- *
- *   npm run dev          development (hot reload)
- *   npm run dev -- --prod   production build output
- *
- * The database step is conditional. If MONGODB_URI points somewhere remote
- * (Atlas, for example) nothing is started locally; if it points at this machine
- * and nothing is listening yet, a local mongod is launched.
- */
 import { spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
 // @next/env is CommonJS, so it has no ESM named exports.
@@ -18,10 +6,7 @@ import nextEnv from '@next/env';
 const { loadEnvConfig } = nextEnv;
 
 const projectDir = process.cwd();
-
-// Read .env.local the same way Next.js will, so the URI decided here is the
-// one the app actually connects with.
-loadEnvConfig(projectDir, true, { info: () => {}, error: () => {} });
+loadEnvConfig(projectDir, true, { info: () => { }, error: () => { } });
 
 const production = process.argv.includes('--prod');
 const WEB_PORT = Number(process.env.PORT ?? 3000);
@@ -60,8 +45,6 @@ function pipeOutput(label, child) {
     });
   }
 }
-
-// ── Process management ───────────────────────────────────────────
 
 const children = [];
 let shuttingDown = false;
@@ -170,9 +153,9 @@ async function main() {
   if (await tcpOpen(WEB_PORT)) {
     process.stderr.write(
       `\n${bold('Port ' + WEB_PORT + ' is already in use')} (needed for the web app).\n` +
-        `Something is still running — probably a previous session.\n\n` +
-        `  Find it:  lsof -i :${WEB_PORT}    (or: ss -lptn 'sport = :${WEB_PORT}')\n` +
-        `  Stop it:  pkill -f next-server\n\n`,
+      `Something is still running — probably a previous session.\n\n` +
+      `  Find it:  lsof -i :${WEB_PORT}    (or: ss -lptn 'sport = :${WEB_PORT}')\n` +
+      `  Stop it:  pkill -f next-server\n\n`,
     );
     process.exit(1);
   }
@@ -201,8 +184,8 @@ async function main() {
 
   process.stdout.write(
     `\n  ${bold('Ready')}  ${paint('36', `http://localhost:${WEB_PORT}`)}\n` +
-      `  ${dim(`admin  http://localhost:${WEB_PORT}/admin`)}\n` +
-      `  ${dim('Ctrl-C stops everything')}\n\n`,
+    `  ${dim(`admin  http://localhost:${WEB_PORT}/admin`)}\n` +
+    `  ${dim('Ctrl-C stops everything')}\n\n`,
   );
 }
 

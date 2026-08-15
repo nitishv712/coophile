@@ -1,13 +1,4 @@
-/**
- * Local MongoDB for development.
- *
- * Downloads a real `mongod` binary into a user-writable cache (no root, no
- * Docker) and runs it against a persistent data directory, so records survive
- * restarts. In production set MONGODB_URI to your own cluster and never run
- * this.
- *
- * Run with: npm run mongo
- */
+
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { MongoMemoryServer } from 'mongodb-memory-server';

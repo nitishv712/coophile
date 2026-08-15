@@ -206,6 +206,7 @@ shown as selectable text under the Copy button.
 | `deploy.sh` | Deploy to a remote host over SSH, with rollback |
 | `Dockerfile` | Three-stage production image on standalone output |
 | `compose.yaml` | Web service, optional local MongoDB, ROM-cache volume |
+| `nginx.conf` | Host reverse proxy — TLS, ROM upload/download limits |
 | `server/run-stack.mjs` | One-command local runner (database + web app) |
 | `server/local-mongo.mjs` | Persistent local MongoDB, no root or Docker needed |
 
