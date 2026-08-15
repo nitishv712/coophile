@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node server/dev.mjs",
-    "start": "node server/dev.mjs --prod",
+    "dev": "node server/run-stack.mjs",
+    "start": "node server/run-stack.mjs --prod",
     "build": "next build",
     "dev:web": "next dev",
-    "mongo": "node server/dev-mongo.mjs",
+    "mongo": "node server/local-mongo.mjs",
     "lint": "eslint"
   },
   "dependencies": {

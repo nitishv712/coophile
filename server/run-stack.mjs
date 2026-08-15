@@ -186,7 +186,7 @@ async function main() {
     say('mongo', `already running on port ${local.port}`);
   } else {
     say('mongo', `starting local database on port ${local.port}`);
-    start('mongo', process.execPath, ['server/dev-mongo.mjs']);
+    start('mongo', process.execPath, ['server/local-mongo.mjs']);
     await waitFor('MongoDB', () => tcpOpen(local.port, local.host));
     say('mongo', 'ready');
   }
