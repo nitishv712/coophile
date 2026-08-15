@@ -16,11 +16,6 @@ export async function fetchGames(): Promise<Game[]> {
   return data.games;
 }
 
-export async function fetchGame(slug: string): Promise<Game> {
-  const data = await unwrap<{ game: Game }>(await fetch(`/api/games/${slug}`));
-  return data.game;
-}
-
 export function romUrl(slug: string): string {
   return `/api/games/${slug}/rom`;
 }

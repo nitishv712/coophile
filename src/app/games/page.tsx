@@ -1,14 +1,12 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import SiteNav from "@/src/components/SiteNav";
 import SiteFooter from "@/src/components/SiteFooter";
 import CartridgeArt from "@/src/components/CartridgeArt";
 import { SYSTEMS } from "@/src/lib/emulator/types";
 import type { Game } from "@/src/lib/games/types";
-import { fetchGames } from "@/src/lib/games/client";
+import { listGames } from "@/src/lib/games/repository";
+import { dbErrorMessage } from "@/src/lib/db/errors";
+import { signInGate } from "@/src/components/SignInGate";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -16,15 +14,7 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function GameCard({
-  game,
-  onPlay,
-  onHost,
-}: {
-  game: Game;
-  onPlay: (game: Game) => void;
-  onHost: (game: Game) => void;
-}) {
+function GameCard({ game }: { game: Game }) {
   const netplayReady = game.coop === "simultaneous";
   const playable = Boolean(game.rom);
 
@@ -80,25 +70,27 @@ function GameCard({
                 </span>
               </div>
 
+              {/* Links rather than click handlers: both actions are plain
+                  navigations, so this card needs no JavaScript at all. */}
               <div className="flex items-center gap-2 shrink-0">
-                <button
+                <Link
                   id={`btn-play-${game.slug}`}
-                  onClick={() => onPlay(game)}
+                  href={`/play?game=${encodeURIComponent(game.slug)}`}
                   className="btn-primary text-xs px-4 py-2 inline-flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-sm">play_arrow</span>
                   Play
-                </button>
+                </Link>
                 {netplayReady && (
-                  <button
+                  <Link
                     id={`btn-online-${game.slug}`}
-                    onClick={() => onHost(game)}
+                    href={`/lobby?game=${encodeURIComponent(game.slug)}`}
                     aria-label={`Play ${game.title} online`}
                     title="Play this online with a friend"
                     className="p-2 bg-surface-container hover:bg-surface-container-high rounded-lg transition-colors text-primary flex items-center justify-center"
                   >
                     <span className="material-symbols-outlined text-lg">bolt</span>
-                  </button>
+                  </Link>
                 )}
               </div>
             </>
@@ -133,28 +125,26 @@ function GameCard({
   );
 }
 
-export default function GamesPage() {
-  const router = useRouter();
-  const [games, setGames] = useState<Game[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+/**
+ * The catalog, read straight from Mongo while the page renders.
+ *
+ * The gate runs before the query, so a signed-out visitor costs no database
+ * work. Past it, the visitor is known to be signed in, and the repository can
+ * be read directly rather than calling this app's own HTTP API back through
+ * the network and re-authenticating on the way in.
+ */
+export default async function GamesPage() {
+  const gate = await signInGate();
+  if (gate) return gate;
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchGames()
-      .then((found) => {
-        if (!cancelled) setGames(found);
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  let games: Game[] = [];
+  let error: string | null = null;
+
+  try {
+    games = await listGames();
+  } catch (cause) {
+    error = dbErrorMessage(cause);
+  }
 
   const playable = games.filter((game) => game.rom);
 
@@ -196,13 +186,7 @@ export default function GamesPage() {
         )}
 
         {/* ── Grid ───────────────────────────────────── */}
-        {loading ? (
-          <div className="flex justify-center py-24">
-            <span className="material-symbols-outlined text-4xl text-primary animate-spin">
-              progress_activity
-            </span>
-          </div>
-        ) : games.length === 0 && !error ? (
+        {games.length === 0 && !error ? (
           <div
             id="library-empty"
             className="card p-12 lg:p-16 text-center max-w-2xl mx-auto"
@@ -228,12 +212,7 @@ export default function GamesPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
             {games.map((game) => (
-              <GameCard
-                key={game.slug}
-                game={game}
-                onPlay={(g) => router.push(`/play?game=${g.slug}`)}
-                onHost={(g) => router.push(`/lobby?game=${g.slug}`)}
-              />
+              <GameCard key={game.slug} game={game} />
             ))}
           </div>
         )}

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Noto_Serif, Public_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import AuthProvider from "@/src/components/AuthProvider";
-import SignInGate from "@/src/components/SignInGate";
+import { requestAuth } from "@/src/lib/auth/session";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -35,11 +35,16 @@ export const metadata: Metadata = {
     "Play retro games with friends. Browser-based NES, SNES, and GBA emulation with peer-to-peer multiplayer.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Reading the session cookie here is what makes every route render on the
+  // server per request: the nav, the gates, and the pages all start from a
+  // verified identity instead of discovering it after hydration.
+  const { user, configured } = await requestAuth();
+
   return (
     // The font variables must live on <html>, not <body>: `@theme` declares
     // --font-body: var(--font-inter) at :root, and a var() inside a custom
@@ -58,8 +63,11 @@ export default function RootLayout({
         />
       </head>
       <body className="font-body bg-surface text-on-surface min-h-screen flex flex-col antialiased">
-        <AuthProvider>
-          <SignInGate>{children}</SignInGate>
+        {/* The gate lives on the individual route layouts, not here: the
+            landing page is public, so a visitor can read what Coophile is
+            before deciding to sign in. */}
+        <AuthProvider initialUser={user} configured={configured}>
+          {children}
         </AuthProvider>
       </body>
     </html>

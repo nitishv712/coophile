@@ -1,12 +1,7 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
+import { useRouter } from "next/navigation";
+import { createContext, useCallback, useContext, useState } from "react";
 
 export interface SessionUser {
   uid: string;
@@ -20,7 +15,6 @@ interface AuthValue {
   user: SessionUser | null;
   /** False when the server has no Firebase credentials — sign-in cannot work. */
   configured: boolean;
-  loading: boolean;
   error: string | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -34,34 +28,37 @@ export function useAuth(): AuthValue {
   return value;
 }
 
-export default function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<SessionUser | null>(null);
-  const [configured, setConfigured] = useState(true);
-  const [loading, setLoading] = useState(true);
+/**
+ * Client-side view of the session, seeded by the server.
+ *
+ * `user` arrives already resolved from the root layout, which read the httpOnly
+ * session cookie during rendering. There is deliberately no fetch-on-mount and
+ * no loading state: the first paint already knows who is signed in, so the nav
+ * never flashes a login button at somebody who is not logged out.
+ */
+export default function AuthProvider({
+  children,
+  initialUser,
+  configured,
+}: {
+  children: React.ReactNode;
+  initialUser: SessionUser | null;
+  configured: boolean;
+}) {
+  const router = useRouter();
+  const [user, setUser] = useState<SessionUser | null>(initialUser);
   const [error, setError] = useState<string | null>(null);
 
-  // Ask the server who we are. The httpOnly session cookie is the source of
-  // truth — the client SDK's own cached token says nothing about whether our
-  // API will accept the request.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/auth/session")
-      .then((res) => res.json())
-      .then((data: { configured?: boolean; user?: SessionUser | null }) => {
-        if (cancelled) return;
-        setConfigured(data.configured !== false);
-        setUser(data.user ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setUser(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Follow the server whenever it re-renders — a `router.refresh()` elsewhere,
+  // or a session that expired between navigations, both arrive as a new
+  // `initialUser` and must win over whatever this component last saw.
+  // Adjusted during render rather than in an effect, so nothing ever paints
+  // with an identity the server has already contradicted.
+  const [lastFromServer, setLastFromServer] = useState<SessionUser | null>(initialUser);
+  if (lastFromServer !== initialUser) {
+    setLastFromServer(initialUser);
+    setUser(initialUser);
+  }
 
   const signIn = useCallback(async () => {
     setError(null);
@@ -73,22 +70,28 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       const res = await fetch("/api/auth/session");
       const data = await res.json();
       setUser(data.user ?? null);
+      // The session cookie is only now set, and every gate and page that read
+      // it did so before it existed. Re-render the server tree so they see it.
+      router.refresh();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       // A closed popup is a normal thing to do, not an error worth shouting about.
       if (/popup-closed-by-user|cancelled-popup-request|popup_closed/i.test(message)) return;
       setError(message);
     }
-  }, []);
+  }, [router]);
 
   const signOut = useCallback(async () => {
     const { signOut: doSignOut } = await import("@/src/lib/auth/firebaseClient");
     await doSignOut();
     setUser(null);
-  }, []);
+    // Same reasoning in reverse: server-rendered pages are still showing
+    // signed-in content until they are asked again without the cookie.
+    router.refresh();
+  }, [router]);
 
   return (
-    <AuthContext.Provider value={{ user, configured, loading, error, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, configured, error, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );

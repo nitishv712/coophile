@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import AuthButton from "./AuthButton";
 import Logo from "./Logo";
 
 /**
@@ -53,13 +54,7 @@ export default function SiteNav() {
           </div>
         </div>
 
-        <Link
-          href="/games"
-          className="font-label tracking-widest uppercase text-xs text-primary font-semibold hover:bg-surface-container-high/50 px-4 py-2 rounded-lg transition-all shrink-0 flex items-center gap-2"
-        >
-          <span className="material-symbols-outlined text-lg">play_circle</span>
-          <span className="hidden sm:inline">Play</span>
-        </Link>
+        <AuthButton />
       </div>
     </nav>
   );
