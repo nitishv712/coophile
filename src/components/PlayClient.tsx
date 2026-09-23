@@ -8,6 +8,12 @@ import EmulatorCanvas, { type EmulatorCanvasHandle } from "@/src/components/Emul
 import KeybindPanel from "@/src/components/KeybindPanel";
 import { type SystemType, SYSTEMS } from "@/src/lib/emulator/types";
 import { displayKey, loadKeyMapping, resolvedKey } from "@/src/lib/emulator/controls";
+import {
+  getTouchPreference,
+  setTouchPreference,
+  subscribeTouchPreference,
+  touchControlsEnabled,
+} from "@/src/lib/emulator/touchLayout";
 import type { Game } from "@/src/lib/games/types";
 import { romUrl as romEndpoint } from "@/src/lib/games/client";
 
@@ -58,6 +64,17 @@ export default function PlayClient({
   );
 
   const droppedRomUrl = useSyncExternalStore(NO_STORE_UPDATES, readStoredRom, noRomOnServer);
+
+  const touchPreference = useSyncExternalStore(
+    subscribeTouchPreference,
+    getTouchPreference,
+    () => "auto" as const,
+  );
+  const touchOn = touchControlsEnabled(touchPreference);
+  const toggleTouch = useCallback(() => {
+    setTouchPreference(touchOn ? "off" : "on");
+    canvasRef.current?.focus();
+  }, [touchOn]);
 
   const system = game?.system ?? requestedSystem;
   const romUrl = game ? romEndpoint(game.slug, game.rom?.sha256) : droppedRomUrl;
@@ -156,6 +173,20 @@ export default function PlayClient({
               <span className="material-symbols-outlined text-xl">keyboard</span>
               <span className="font-label text-xs tracking-widest uppercase hidden sm:inline">
                 Controls
+              </span>
+            </button>
+            <button
+              id="btn-touch-toggle"
+              onClick={toggleTouch}
+              title={touchOn ? "Hide on-screen buttons" : "Show on-screen buttons"}
+              aria-pressed={touchOn}
+              className={`p-2 rounded-lg hover:bg-surface-container-high transition-colors flex items-center gap-2 ${
+                touchOn ? "text-primary" : "text-on-surface-variant hover:text-primary"
+              }`}
+            >
+              <span className="material-symbols-outlined text-xl">gamepad</span>
+              <span className="font-label text-xs tracking-widest uppercase hidden sm:inline">
+                Touch
               </span>
             </button>
             <button

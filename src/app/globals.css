@@ -210,6 +210,17 @@ body {
   color: color-mix(in srgb, var(--color-on-surface-variant) 55%, transparent);
 }
 
+/* ── Touch controls ────────────────────────────────── */
+/* No scroll, zoom, text selection or long-press menu from a thumb that is
+   busy playing. */
+.touch-ui {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
 /* ── Animations ────────────────────────────────────── */
 @keyframes fade-in {
   from {

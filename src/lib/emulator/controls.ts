@@ -205,6 +205,52 @@ export function keyEventToEjsValue(event: KeyboardEvent): string {
   return NAMED_KEYS[event.key] ?? event.key.toLowerCase();
 }
 
+/**
+ * EmulatorJS's own key table, inverted: its name for a key → the `keyCode` it
+ * matches presses against. Read out of its bundle (`keyMap`), so a synthetic
+ * event built from this table is indistinguishable from the real key.
+ */
+const EJS_KEY_CODES: Record<string, number> = {
+  backspace: 8, tab: 9, enter: 13, shift: 16, ctrl: 17, alt: 18, 'pause/break': 19,
+  'caps lock': 20, escape: 27, esc: 27, space: 32, 'page up': 33, 'page down': 34,
+  end: 35, home: 36, 'left arrow': 37, 'up arrow': 38, 'right arrow': 39,
+  'down arrow': 40, insert: 45, delete: 46,
+  '0': 48, '1': 49, '2': 50, '3': 51, '4': 52, '5': 53, '6': 54, '7': 55, '8': 56, '9': 57,
+  a: 65, b: 66, c: 67, d: 68, e: 69, f: 70, g: 71, h: 72, i: 73, j: 74, k: 75, l: 76,
+  m: 77, n: 78, o: 79, p: 80, q: 81, r: 82, s: 83, t: 84, u: 85, v: 86, w: 87, x: 88,
+  y: 89, z: 90,
+  'numpad 0': 96, 'numpad 1': 97, 'numpad 2': 98, 'numpad 3': 99, 'numpad 4': 100,
+  'numpad 5': 101, 'numpad 6': 102, 'numpad 7': 103, 'numpad 8': 104, 'numpad 9': 105,
+  multiply: 106, add: 107, subtract: 109, 'decimal point': 110, divide: 111,
+  f1: 112, f2: 113, f3: 114, f4: 115, f5: 116, f6: 117, f7: 118, f8: 119, f9: 120,
+  f10: 121, f11: 122, f12: 123, 'num lock': 144, 'scroll lock': 145,
+  'semi-colon': 186, 'equal sign': 187, comma: 188, dash: 189, period: 190,
+  'forward slash': 191, 'grave accent': 192, 'open bracket': 219, 'back slash': 220,
+  'close braket': 221, 'single quote': 222,
+};
+
+/** `KeyboardEvent.key` for an EmulatorJS key name — the inverse of `NAMED_KEYS`. */
+const DOM_KEYS: Record<string, string> = Object.fromEntries(
+  Object.entries(NAMED_KEYS).map(([domKey, value]) => [value, domKey]),
+);
+
+/**
+ * What to put in a synthetic KeyboardEvent so that both EmulatorJS (which
+ * matches on `keyCode`) and this app's own listeners (which read `key`) see
+ * the local player's bound key for `slot`. Null when the bound key is one
+ * EmulatorJS has no code for, in which case a real keyboard would not work
+ * for it either.
+ */
+export function localKeyEvent(
+  mapping: KeyMapping,
+  slot: ButtonSlot,
+): { key: string; keyCode: number } | null {
+  const value = resolvedKey(mapping, slot).toLowerCase();
+  const keyCode = EJS_KEY_CODES[value];
+  if (keyCode === undefined) return null;
+  return { key: DOM_KEYS[value] ?? value, keyCode };
+}
+
 /** A short, readable form of an EJS key value for display — "up arrow" → "↑". */
 export function displayKey(value: string): string {
   const symbols: Record<string, string> = {

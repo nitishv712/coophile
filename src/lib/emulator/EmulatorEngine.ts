@@ -4,7 +4,9 @@ import {
   buildDefaultControls,
   buildNetplayControls,
   loadKeyMapping,
+  localKeyEvent,
   type ButtonSlot,
+  type KeyMapping,
 } from './controls';
 
 /**
@@ -39,6 +41,7 @@ declare global {
     EJS_backgroundColor?: string;
     EJS_fullscreenOnLoaded?: boolean;
     EJS_defaultControls?: Record<number, Record<number, { value: string; value2?: string }>>;
+    EJS_defaultOptions?: Record<string, string>;
   }
 }
 
@@ -47,6 +50,8 @@ export class EmulatorEngine {
   private container: HTMLElement;
   private loaded: boolean = false;
   private scriptEl: HTMLScriptElement | null = null;
+  /** The local player's bindings, as read when the core was configured. */
+  private mapping: KeyMapping = {};
 
   constructor(container: HTMLElement, config: EmulatorConfig) {
     this.container = container;
@@ -76,11 +81,16 @@ export class EmulatorEngine {
     // straight into whatever is here, so leaving it unset is the safest way to
     // get its own untouched defaults.
     const mapping = loadKeyMapping();
+    this.mapping = mapping;
     const controls = this.config.netplayRole
       ? buildNetplayControls(mapping, this.config.netplayRole)
       : buildDefaultControls(mapping);
     if (controls) window.EJS_defaultControls = controls;
     else delete window.EJS_defaultControls;
+    // EmulatorJS turns its own fixed virtual gamepad on for phones. This app
+    // draws its own, movable one (see TouchControls), so keep theirs off —
+    // two sets of buttons on one small screen helps nobody.
+    window.EJS_defaultOptions = { 'virtual-gamepad': 'disabled' };
 
     // Load EmulatorJS loader script
     return new Promise((resolve, reject) => {
@@ -129,6 +139,29 @@ export class EmulatorEngine {
    */
   focusGame(): void {
     this.container.focus();
+  }
+
+  /**
+   * Press or release a button on the local player's behalf — what the
+   * on-screen touch controls do.
+   *
+   * Goes through the same synthetic-keyboard path as a physical key, carrying
+   * the player's own binding for the slot, so everything downstream treats it
+   * identically: EmulatorJS drives the local controller, and in netplay the
+   * relay listener on the container forwards the transition to the peer.
+   */
+  sendLocalInput(slot: ButtonSlot, down: boolean): void {
+    const key = localKeyEvent(this.mapping, slot);
+    if (!key) return;
+    this.container.dispatchEvent(
+      new KeyboardEvent(down ? 'keydown' : 'keyup', {
+        key: key.key,
+        keyCode: key.keyCode,
+        which: key.keyCode,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
   }
 
   /**
@@ -204,6 +237,7 @@ export class EmulatorEngine {
     delete window.EJS_gameName;
     delete window.EJS_color;
     delete window.EJS_defaultControls;
+    delete window.EJS_defaultOptions;
 
     // Clear the container
     this.container.innerHTML = '';

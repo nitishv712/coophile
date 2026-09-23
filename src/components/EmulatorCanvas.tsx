@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useImperativeHandle, useRef, useState, forwardRef } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from 'react';
 import { EmulatorEngine } from '@/src/lib/emulator/EmulatorEngine';
+import TouchControls from '@/src/components/TouchControls';
 import { SystemType, SYSTEMS } from '@/src/lib/emulator/types';
 import {
   buildKeyLookup,
@@ -49,6 +50,10 @@ const EmulatorCanvas = forwardRef<EmulatorCanvasHandle, EmulatorCanvasProps>(
       focus: () => engineRef.current?.focusGame(),
       sendRemoteInput: (slot, down) => engineRef.current?.sendRemoteInput(slot, down),
     }));
+
+    const sendLocalInput = useCallback((slot: ButtonSlot, down: boolean) => {
+      engineRef.current?.sendLocalInput(slot, down);
+    }, []);
 
     // Keep the latest relay callback without re-running the engine effect,
     // which would tear down and reload the emulator mid-game.
@@ -184,6 +189,11 @@ const EmulatorCanvas = forwardRef<EmulatorCanvasHandle, EmulatorCanvasProps>(
           className="w-full h-full"
           style={{ minHeight: '400px' }}
         />
+
+        {/* On-screen gamepad. Sits above the core's canvas but below the
+            loading and error overlays, and only once there is a game to
+            drive. */}
+        {!isLoading && !error && <TouchControls system={system} onInput={sendLocalInput} />}
       </div>
     );
   },
