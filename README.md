@@ -27,6 +27,13 @@ LiveKit only performs the introduction. Once the direct data channel is open it
 is out of the loop entirely — gameplay inputs never touch it, so its latency
 does not affect play.
 
+Everything on the way to that first frame is cached as close to the player as
+it can be: the catalog is held in memory on the server, ROMs are cached on the
+server's disk after their first read from the database, and each ROM URL
+carries its SHA-256 so the browser (and EmulatorJS's own IndexedDB store) can
+keep the bytes forever. The lobby prefetches the ROM as soon as both players
+are connected, so pressing Start does not begin with a download.
+
 ## Running locally
 
 ```bash

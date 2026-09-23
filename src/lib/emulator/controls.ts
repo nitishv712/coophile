@@ -186,22 +186,23 @@ export function findConflict(
  * ("up arrow", not "ArrowUp"; lowercase letters). Captured live from a
  * keydown, so this only needs to cover keys people actually press.
  */
+const NAMED_KEYS: Record<string, string> = {
+  ArrowUp: 'up arrow',
+  ArrowDown: 'down arrow',
+  ArrowLeft: 'left arrow',
+  ArrowRight: 'right arrow',
+  ' ': 'space',
+  Enter: 'enter',
+  Tab: 'tab',
+  Escape: 'esc',
+  Shift: 'shift',
+  Control: 'ctrl',
+  Alt: 'alt',
+  Backspace: 'backspace',
+};
+
 export function keyEventToEjsValue(event: KeyboardEvent): string {
-  const named: Record<string, string> = {
-    ArrowUp: 'up arrow',
-    ArrowDown: 'down arrow',
-    ArrowLeft: 'left arrow',
-    ArrowRight: 'right arrow',
-    ' ': 'space',
-    Enter: 'enter',
-    Tab: 'tab',
-    Escape: 'esc',
-    Shift: 'shift',
-    Control: 'ctrl',
-    Alt: 'alt',
-    Backspace: 'backspace',
-  };
-  return named[event.key] ?? event.key.toLowerCase();
+  return NAMED_KEYS[event.key] ?? event.key.toLowerCase();
 }
 
 /** A short, readable form of an EJS key value for display — "up arrow" → "↑". */
@@ -258,18 +259,27 @@ export const REMOTE_KEYS: Record<ButtonSlot, { value: string; keyCode: number }>
 export type NetplayRole = 'host' | 'guest';
 
 /**
+ * Key value → button, resolved once per mapping.
+ *
+ * Built ahead of time so the keydown path, which sits between the player's
+ * finger and the network, does no localStorage reads, JSON parsing or scans.
+ */
+export type KeyLookup = ReadonlyMap<string, ButtonSlot>;
+
+export function buildKeyLookup(mapping: KeyMapping): KeyLookup {
+  const lookup = new Map<string, ButtonSlot>();
+  for (const slot of BUTTON_ORDER) {
+    lookup.set(resolvedKey(mapping, slot).toLowerCase(), slot);
+  }
+  return lookup;
+}
+
+/**
  * Which button the local player just pressed, or null if the key is unbound.
  * Used to decide what to relay to the other side.
  */
-export function slotForKeyEvent(
-  mapping: KeyMapping,
-  event: KeyboardEvent,
-): ButtonSlot | null {
-  const pressed = keyEventToEjsValue(event);
-  for (const slot of BUTTON_ORDER) {
-    if (resolvedKey(mapping, slot).toLowerCase() === pressed.toLowerCase()) return slot;
-  }
-  return null;
+export function slotForKeyEvent(lookup: KeyLookup, event: KeyboardEvent): ButtonSlot | null {
+  return lookup.get(keyEventToEjsValue(event).toLowerCase()) ?? null;
 }
 
 /**

@@ -55,6 +55,12 @@ export default async function RootLayout({
       className={`${inter.variable} ${notoSerif.variable} ${publicSans.variable} ${jetbrainsMono.variable}`}
     >
       <head>
+        {/* The icon stylesheet below is render-blocking and comes from a
+            third-party host; opening both connections now, rather than when
+            the parser reaches the <link>, takes the DNS + TLS handshakes off
+            the critical path. gstatic serves the font file itself. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {/* Icon font. next/font cannot handle a variable icon font, so this one
             is loaded the ordinary way. */}
         <link

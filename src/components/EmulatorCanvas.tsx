@@ -4,6 +4,7 @@ import { useEffect, useImperativeHandle, useRef, useState, forwardRef } from 're
 import { EmulatorEngine } from '@/src/lib/emulator/EmulatorEngine';
 import { SystemType, SYSTEMS } from '@/src/lib/emulator/types';
 import {
+  buildKeyLookup,
   loadKeyMapping,
   slotForKeyEvent,
   type ButtonSlot,
@@ -101,9 +102,13 @@ const EmulatorCanvas = forwardRef<EmulatorCanvasHandle, EmulatorCanvasProps>(
       // other player's screen indefinitely.
       const held = new Set<ButtonSlot>();
 
+      // Resolved once: the mapping cannot change while a game is running (a
+      // save forces a reload), so the per-keypress path is a single Map get.
+      const lookup = buildKeyLookup(loadKeyMapping());
+
       const relay = (down: boolean) => (event: KeyboardEvent) => {
         if (event.repeat) return; // only transitions, not auto-repeat
-        const slot = slotForKeyEvent(loadKeyMapping(), event);
+        const slot = slotForKeyEvent(lookup, event);
         if (!slot) return;
         // Ignore duplicate transitions — a repeated down would desync the pair.
         if (down === held.has(slot)) return;

@@ -12,15 +12,77 @@ async function collection() {
   return db.collection<GameDoc>(GAMES);
 }
 
+/**
+ * The catalog, held in memory.
+ *
+ * Every page past the sign-in gate reads it — the library, the play screen,
+ * the lobby — and the ROM route consults it before it can serve a single byte,
+ * even one already cached on disk. Each of those reads was a round-trip to
+ * Atlas, measured at ~100ms from here, for a handful of documents that only
+ * change when an admin edits them.
+ *
+ * Writes go through this module, so they drop the cache themselves; the TTL
+ * only bounds staleness if a second instance ever writes to the same database.
+ *
+ * Lives on `globalThis` for the same reason the Mongo client does: route
+ * bundles can each carry their own copy of this module, and an admin route
+ * invalidating its private copy would leave the pages serving stale data.
+ */
+interface CatalogCache {
+  docs: GameDoc[] | null;
+  loadedAt: number;
+  inflight: Promise<GameDoc[]> | null;
+}
+
+declare global {
+  var __coophileCatalog: CatalogCache | undefined;
+}
+
+const CATALOG_TTL_MS = 30_000;
+
+function catalogCache(): CatalogCache {
+  globalThis.__coophileCatalog ??= { docs: null, loadedAt: 0, inflight: null };
+  return globalThis.__coophileCatalog;
+}
+
+async function loadCatalog(): Promise<GameDoc[]> {
+  const cache = catalogCache();
+  if (cache.docs && Date.now() - cache.loadedAt < CATALOG_TTL_MS) return cache.docs;
+
+  // One fetch serves every concurrent reader — both peers open the lobby at
+  // the same moment and should not each pay for their own query.
+  cache.inflight ??= (async () => {
+    try {
+      const games = await collection();
+      const docs = await games.find({}).sort({ createdAt: 1 }).toArray();
+      cache.docs = docs;
+      cache.loadedAt = Date.now();
+      return docs;
+    } finally {
+      cache.inflight = null;
+    }
+  })();
+  return cache.inflight;
+}
+
+function invalidateCatalog(): void {
+  const cache = catalogCache();
+  cache.docs = null;
+  cache.loadedAt = 0;
+}
+
+async function findDoc(slug: string): Promise<GameDoc | null> {
+  const docs = await loadCatalog();
+  return docs.find((doc) => doc.slug === slug) ?? null;
+}
+
 export async function listGames(): Promise<Game[]> {
-  const games = await collection();
-  const docs = await games.find({}).sort({ createdAt: 1 }).toArray();
+  const docs = await loadCatalog();
   return docs.map(toGame);
 }
 
 export async function getGame(slug: string): Promise<Game | null> {
-  const games = await collection();
-  const doc = await games.findOne({ slug });
+  const doc = await findDoc(slug);
   return doc ? toGame(doc) : null;
 }
 
@@ -59,6 +121,7 @@ export async function createGame(input: GameInput): Promise<Game> {
     if ((error as { code?: number }).code === 11000) throw new SlugTakenError(doc.slug);
     throw error;
   }
+  invalidateCatalog();
   return toGame(doc);
 }
 
@@ -93,6 +156,7 @@ export async function updateGame(slug: string, input: GameInput): Promise<Game |
   };
 
   await games.updateOne({ slug }, { $set: updated });
+  invalidateCatalog();
   const doc = await games.findOne({ slug: nextSlug });
   return doc ? toGame(doc) : null;
 }
@@ -107,6 +171,7 @@ export async function deleteGame(slug: string): Promise<boolean> {
     await dropCached(doc.rom.sha256);
   }
   await games.deleteOne({ slug });
+  invalidateCatalog();
   return true;
 }
 
@@ -197,6 +262,7 @@ export async function attachRom(
       },
     },
   );
+  invalidateCatalog();
   if (previous) await removeRomFile(previous);
 
   // The bytes are already in hand, so seed the cache now rather than making the
@@ -217,6 +283,7 @@ export async function detachRom(slug: string): Promise<Game | null> {
     await dropCached(doc.rom.sha256);
   }
   await games.updateOne({ slug }, { $set: { rom: null, updatedAt: new Date() } });
+  invalidateCatalog();
 
   const updated = await games.findOne({ slug });
   return updated ? toGame(updated) : null;
@@ -230,8 +297,9 @@ export interface RomStream {
 }
 
 export async function openRom(slug: string): Promise<RomStream | null> {
-  const games = await collection();
-  const doc = await games.findOne({ slug });
+  // From the in-memory catalog: a cached ROM must not cost a database
+  // round-trip just to learn which file to open.
+  const doc = await findDoc(slug);
   if (!doc?.rom) return null;
 
   const { fileName, size, sha256 } = doc.rom;

@@ -60,7 +60,7 @@ export default function PlayClient({
   const droppedRomUrl = useSyncExternalStore(NO_STORE_UPDATES, readStoredRom, noRomOnServer);
 
   const system = game?.system ?? requestedSystem;
-  const romUrl = game ? romEndpoint(game.slug) : droppedRomUrl;
+  const romUrl = game ? romEndpoint(game.slug, game.rom?.sha256) : droppedRomUrl;
 
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {

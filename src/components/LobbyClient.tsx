@@ -129,6 +129,24 @@ export default function LobbyClient({
 
   useEffect(() => () => session.destroy(), [session]);
 
+  // Warm the ROM while the players are still in the lobby. The response is
+  // immutable and keyed by hash, so when EmulatorJS asks for the same URL
+  // after "Start" the bytes come out of the browser's HTTP cache instead of
+  // being downloaded — by both players, at once — at the moment they want
+  // to play.
+  const romSha = game?.rom?.sha256 ?? null;
+  const romSlug = game?.slug ?? null;
+  useEffect(() => {
+    if (!state.channelOpen || !romSlug || !romSha) return;
+    const controller = new AbortController();
+    fetch(romEndpoint(romSlug, romSha), { signal: controller.signal, priority: "low" })
+      .then((res) => res.arrayBuffer())
+      .catch(() => {
+        // A failed prefetch just means the real load pays the full price.
+      });
+    return () => controller.abort();
+  }, [state.channelOpen, romSlug, romSha]);
+
   const handleHost = useCallback(async () => {
     setBusy(true);
     setLocalError(null);
@@ -543,7 +561,7 @@ export default function LobbyClient({
                   <EmulatorCanvas
                     ref={canvasRef}
                     system={game.system}
-                    romUrl={romEndpoint(game.slug)}
+                    romUrl={romEndpoint(game.slug, game.rom.sha256)}
                     netplayRole={state.isHost ? "host" : "guest"}
                     onLocalInput={relayLocalInput}
                   />

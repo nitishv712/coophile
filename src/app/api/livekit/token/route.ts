@@ -1,4 +1,4 @@
-import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
+import { AccessToken, RoomConfiguration } from 'livekit-server-sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { withUser } from '@/src/lib/auth/firebaseAdmin';
 
@@ -53,18 +53,21 @@ export async function POST(req: NextRequest) {
 
       let roomName: string;
       const wantCreate = Boolean(body.create);
+      let roomConfig: RoomConfiguration | undefined;
 
       if (wantCreate) {
-        // Host flow: create a room with a generated code.
+        // Host flow: a generated code, with the room's settings carried in
+        // the token itself. LiveKit applies them when the host's join creates
+        // the room, which spares this handler a round-trip to the LiveKit API
+        // — the host used to wait on that before it could even start
+        // connecting.
         roomName = makeRoomCode();
         const system = typeof body.system === 'string' ? body.system : undefined;
-
-        const roomService = new RoomServiceClient(livekitUrl, apiKey, apiSecret);
-        await roomService.createRoom({
+        roomConfig = new RoomConfiguration({
           name: roomName,
           maxParticipants: 2,
           emptyTimeout: 10 * 60, // 10 minutes, matches the old signaling sweep
-          metadata: system ? JSON.stringify({ system }) : undefined,
+          metadata: system ? JSON.stringify({ system }) : '',
         });
       } else {
         // Join flow: use the room code provided.
@@ -85,10 +88,12 @@ export async function POST(req: NextRequest) {
       at.addGrant({
         roomJoin: true,
         room: roomName,
+        roomCreate: wantCreate,
         canPublish: true,
         canSubscribe: true,
         canPublishData: true,
       });
+      if (roomConfig) at.roomConfig = roomConfig;
 
       const token = await at.toJwt();
 

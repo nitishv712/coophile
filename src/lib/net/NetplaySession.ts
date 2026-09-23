@@ -109,6 +109,14 @@ export class NetplaySession {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private _isHost = false;
   private direct: DirectPeer | null = null;
+  /**
+   * Handshake payloads that arrived before `openDirect()` ran. The host offers
+   * the moment it sees the guest join, and that offer can reach the guest
+   * before the guest's own connection callbacks have created its DirectPeer.
+   * Dropping it would silently leave the session on the relayed path — a
+   * hundred-odd milliseconds slower — for the whole game.
+   */
+  private pendingSignals: DirectSignal[] = [];
 
   constructor() {
     this.room = new Room({
@@ -243,6 +251,7 @@ export class NetplaySession {
     this.messageHandlers.clear();
     this.direct?.close();
     this.direct = null;
+    this.pendingSignals = [];
     this.room.disconnect();
     this.patch({ ...INITIAL_STATE });
   }
@@ -354,6 +363,10 @@ export class NetplaySession {
     });
 
     void this.direct.start();
+
+    const queued = this.pendingSignals;
+    this.pendingSignals = [];
+    for (const signal of queued) void this.direct.accept(signal);
   }
 
   private handleNetMessage(raw: string): void {
@@ -366,7 +379,9 @@ export class NetplaySession {
 
     // Handshake for the direct channel — never surfaced to the app.
     if (message.t === 'signal') {
-      void this.direct?.accept(message.signal as DirectSignal);
+      const signal = message.signal as DirectSignal;
+      if (this.direct) void this.direct.accept(signal);
+      else this.pendingSignals.push(signal);
       return;
     }
 
